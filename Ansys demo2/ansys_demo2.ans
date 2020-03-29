@@ -1,0 +1,61 @@
+finish
+/clear
+
+/prep7
+!List of Nodes
+n,  1 ,  0.0,  0.0
+n,  11,  10.0,  0.0
+fill,1,11,9
+n, 15, 6, 4 
+fill,11,15,3
+n, 16, 5, 4 
+n, 17, 4, 4 
+fill,17,1,3,18,1
+
+
+et, 1, beam3         ! Element type beam3
+
+!Material Properties
+mp, ex, 1, 1.e7         ! Elastic modulus for material number 1
+mp, prxy, 1, 0.3        ! Poisson’s ratio
+
+
+! Real constant set 1 for a 0.5 x 0.375 rectangular xsctn beam.
+! Area, Izz (flexural Inertia), height 'h' as in sigma = Mc/I, c = h/2
+r, 1, 1, 1, 1 
+
+
+!Create  elements in a for loop
+*DO,idx,1,19
+    e,  idx,  idx+1       ! Element Number 1 connects nodes 1 & 2
+*ENDDO
+! Last element to close the structure
+e, 20 , 1
+
+
+!Displacement Boundary Conditions
+d, 1, all, 0.0        ! Node 1 fixed
+d, 11, uy, 1          ! Displacement imposed at node 11
+
+!Applied Force
+f, 16, fy, -1e6       ! Force at node 16 in positive y-direction
+
+/pnum, elem, 1       ! Plot element numbers
+eplot                ! Plot the elements
+finish
+
+/solu                ! Select static load solution
+antype, static
+solve
+
+! Plot solution and show displacements	
+/POST1  
+PLDISP,1
+PRNSOL,U,COMP  
+	
+
+
+
+
+
+
