@@ -39,6 +39,7 @@ eplot                ! Plot the elements
 finish
 
 /solu                ! Select static load solution
+nlgeom, on			 ! Large displacements
 antype, static
 solve
 

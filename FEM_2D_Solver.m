@@ -15,7 +15,7 @@ classdef FEM_2D_Solver
     
     
     properties (SetAccess = private)
-        stiffness_matrix = [];   % Global stiffness matrix
+        stiffness_matrix = [];  % Global stiffness matrix
         dof = [];               % Degrees of freedom
         n_nodes = [];           % Number of nodes
         results = struct('deformed'      , [],...
@@ -32,6 +32,7 @@ classdef FEM_2D_Solver
     
     methods
         function this = FEM_2D_Solver()
+
         end
         
         
@@ -96,10 +97,12 @@ classdef FEM_2D_Solver
                                 0.3*force_direction(1), ...
                                 0.3*force_direction(2),... 
                                 'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1);
-            end
+            end    
             
-            ansys_displacements = [zeros(11,1) , [0; 0.096; 0.3393; 0.65587 ; 0.97467; 1.2240;...
-                1.3487; 1.3604; 1.2873; 1.1578; 1.0000 ]];           
+            % Displacements obtained from ansys simulation
+            ansys_displacements = [[0;0.0019;-0.00995;-0.0367;-0.0640;-0.0771;-0.0882;-0.0888;-0.0893;-0.0935;-0.1007] ,...
+                                   [0;0.095;0.33;0.64;0.96;1.20;1.33;1.34;1.27;1.15;1]];
+            
             ansys_solution = ansys_displacements + this.coordinates;
             
             h(end+1) = plot(ansys_solution(:,1) , ansys_solution(:,2) , 'g--');
@@ -122,7 +125,7 @@ classdef FEM_2D_Solver
                 msg = {'Error! This function should be called as follows' ; ...
                        'obj = FEM_2D_Solver;' ; 
                        'obj = obj.demo()';
-                       'disp(obj.results.displacements'};
+                       'disp(obj.results.displacements)'};
                 error(strjoin(msg , '\n'))
             end
             
@@ -143,11 +146,11 @@ classdef FEM_2D_Solver
                 
             % Boundary conditions
             this.BC = [0 0 0 ; NaN(this.n_nodes-1 , 3)];  % Base constrained in displacements and rotation
-            this.BC(11,:) = [NaN 1 NaN];                 % Imposed displacement at the far side
+            this.BC(11,:) = [NaN 1 NaN];                  % Imposed displacement at the far side
             
             % Loads
             this.loading_steps = 10;                      % Apply BC and loads in 10 steps
-            this.loads = zeros(this.n_nodes , 3);               % Empty load matrix
+            this.loads = zeros(this.n_nodes , 3);         % Empty load matrix
             this.loads(16 , :) = [0 -1e6 0];  % Add load at the to
             
             this = this.solveFEM();
@@ -180,9 +183,12 @@ classdef FEM_2D_Solver
                                 'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1);
             end
             
-            
-            ansys_displacements = [[0;0.03;0.07;0.1;0.14;0.17;0.21;0.24;0.28;0.31;0.35;0.19;0.02;-0.14;-0.26;-0.23;-0.19;-0.12;-0.079;-0.046] , ...
-                                   [0;0.0095;0.0381;0.0862;0.1543;0.2426;0.3514;0.4812;0.6324;0.8052;1;0.7221;0.4339;0.1567;-0.088;-0.2223;-0.2856;-0.2387;-0.1608;-0.0739]];           
+            % Displacements obtained from ansys simulation
+            ansys_displacements = [0,0;0.0389,0.010;0.077,0.040;0.115,0.087;0.15,0.153;0.188,0.237;0.222,0.341;0.253,0.466;...
+                                   0.281,0.615;0.305,0.791;0.322,1;0.179,0.692;0.0225,0.361;-0.125,0.046;-0.238,-0.217;...
+                                   -0.196,-0.346;-0.153,-0.393;-0.0935,0 ; -0.06762, 0; -0.046, 0; 0,0];
+
+
             ansys_solution = ansys_displacements + this.coordinates;
             
             h(end+1) = plot(ansys_solution(:,1) , ansys_solution(:,2) , 'g--');
@@ -221,7 +227,7 @@ classdef FEM_2D_Solver
             this.intermediary_F  = this.loads / this.loading_steps;
             for j = 1 : this.loading_steps
 
-                % Assemble martix
+                % Assemble matrix
                 this.stiffness_matrix = this.assemble_matrix();
 
                 F = this.assemble_loads();
@@ -253,8 +259,8 @@ classdef FEM_2D_Solver
 
             for k = 1 : size(this.connectivity , 1)
                 % Two nodes
-                p1 = this.coordinates(this.connectivity(k,1),:);
-                p2 = this.coordinates(this.connectivity(k,2),:);
+                p1 = this.intermediary_solution(this.connectivity(k,1),:);
+                p2 = this.intermediary_solution(this.connectivity(k,2),:);
                 % Length
                 L = norm(p1 - p2);
 
@@ -314,6 +320,17 @@ classdef FEM_2D_Solver
             if ~isempty(loads)
                 this = checkData(this);
             end
+        end
+        function loads = get.loads(this)
+            % Returns the loads or an empty array for no loads
+            
+            loads = this.loads;
+            % If no loads are assigned, assumed unloaded            
+            if numel(loads) == 0
+                loads = zeros(this.n_nodes , 3); 
+            end
+            
+
         end
         
          function h = plot_deformed(this)
@@ -399,7 +416,10 @@ classdef FEM_2D_Solver
         
         function F = assemble_loads(this)
             % Assemble the loads in the right order and positions
-            F = zeros(numel(this.loads),1);
+
+            N = numel(this.loads);
+
+            F = zeros(N,1);
             F(1:3:end) = this.intermediary_F(:,1);   % X forces
             F(2:3:end) = this.intermediary_F(:,2);   % Y forces
             F(3:3:end) = this.intermediary_F(:,3);   % Moments
@@ -450,6 +470,13 @@ classdef FEM_2D_Solver
         
         function K = assemble_K(~, K, kg , g)    
             % Assembles the global stiffness matrix from one local matrix
+            % I tried a vectorized version of this loop, but it took longer
+            % than the loop!
+            %
+            % Input:
+            %   K: global stiffness matrix
+            %   kg: local stiffess matrix in global coordinates
+            %   g: steering vector (element numbers)
 
             eldof = 2*3; % Number of degrees of freedom per element 	
             for i=1:eldof
