@@ -1,16 +1,19 @@
-classdef FEM_2D_Solver
+classdef FEM_3D_Solver
     
-	properties (SetAccess = public)
+	properties
         coordinates  = [];      % Nodes coordinates
         connectivity = [];      % Element connectivity matrix
         
-        loads = [];             % Nodal loads
+        loads = [];             % Nodal loads [Fx, Fy, Fz, Mx, My, Mz]
         loading_steps = 1;      % Number of loading steps
         
-        E   = [];               % Young's modulus
         CSA = [];               % Cross-sectional area
-        I   = [];               % Moment of inertia
-        BC  = [];               % Border conditions
+        G   = [];               % Shear modulus
+        J   = [];               % Torsional constant (Polar Moment of Inertia)
+        E   = [];               % Young's modulus
+        Iy  = [];               % Moment of inertia y
+        Iz  = [];               % Moment of inertia z        
+        BC  = [];               % Boundary conditions [ux1; uy1; uz1; rotx1; roty1; rotz1; ux2; uy2; uz2; rotx2; roty2; rotz2;]
     end
     
     
@@ -22,7 +25,6 @@ classdef FEM_2D_Solver
                          'displacements' , [], ...
                          'rotations'     , [] , ...
                          'forces'        , []);
-        element_length = [];  % Store initial length of all elements
     end
     
     properties (SetAccess = private, GetAccess = private)
@@ -32,7 +34,7 @@ classdef FEM_2D_Solver
     end
     
     methods
-        function this = FEM_2D_Solver()
+        function this = FEM_3D_Solver()
 
         end
         
@@ -52,24 +54,28 @@ classdef FEM_2D_Solver
             end
             
             % Reset object to input data
-            this = FEM_2D_Solver;
+            this = FEM_3D_Solver;
             
             this.E   = 1e7;     % Young's modulus
-            this.CSA = 1;     % Cross-sectionala area
-            this.I   = 1;    % Moment of inertia
+            this.CSA = 100;     % Cross-sectionala area
+            this.Iy  = 1;    % Moment of inertia
+            this.Iz  = 1;    % Moment of inertia
+            this.G   = 1;
+            this.J   = 1;
             
             % Geometry of horizontal beam
-            this.coordinates  = [linspace(0,10,11) ; zeros(1,11)]';
+            this.coordinates  = [linspace(0,10,11) ; zeros(1,11); zeros(1,11)]';
             this.connectivity = [1:this.n_nodes-1; 2:this.n_nodes]'; % Each element connected to the next
             
             % Boundary conditions
-            this.BC = [0 0 0 ; NaN(this.n_nodes-1 , 3)];  % Base constrained in displacements and rotation
-            this.BC(end,:) = [NaN 1 NaN];                 % Imposed displacement at the top
+            this.BC = [0 0 0 0 0 0 ; NaN(this.n_nodes-1 , 6)];    % Base constrained in displacements and rotation    
+            this.BC(end,:) = [NaN, 1, NaN, NaN, NaN, NaN];        % Imposed displacement at the top
             
             % Loads
-            this.loading_steps = 10;                      % Apply BC and loads in 10 steps
-            this.loads = zeros(this.n_nodes , 3);               % Empty load matrix
-            this.loads(round(this.n_nodes/2) , :) = [0 1e6 0];  % Add load mid-shaft
+            this.loading_steps = 20;                      % Apply BC and loads in 10 steps
+            this.loads = zeros(this.n_nodes , 6);          % Empty load matrix
+            this.loads(round(this.n_nodes/2) , :) = [0, 0, 1e2, 0, 0 0];  % Add load mid-shaft
+            
             
             this = this.solveFEM();
             
@@ -102,7 +108,7 @@ classdef FEM_2D_Solver
             
             % Displacements obtained from ansys simulation
             ansys_displacements = [[0;0.0019;-0.00995;-0.0367;-0.0640;-0.0771;-0.0882;-0.0888;-0.0893;-0.0935;-0.1007] ,...
-                                   [0;0.095;0.33;0.64;0.96;1.20;1.33;1.34;1.27;1.15;1]];
+                                   [0;0.095;0.33;0.64;0.96;1.20;1.33;1.34;1.27;1.15;1], zeros(11,1)];
             
             ansys_solution = ansys_displacements + this.coordinates;
             
@@ -131,7 +137,7 @@ classdef FEM_2D_Solver
             end
             
             % Reset object to input data
-            this = FEM_2D_Solver;
+            this = FEM_3D_Solver;
             
             this.E   = 1e7;  % Young's modulus
             this.CSA = 1;    % Cross-sectionala area
@@ -223,20 +229,19 @@ classdef FEM_2D_Solver
             % zero rotations.
             this.intermediary_solution = this.coordinates;
             cumulative_rotations  = zeros(this.n_nodes,1);
-
-            % Initial element lengths
-            this.element_length = this.get_element_length();
+            cumdisp = zeros(this.n_nodes,3);
 
             % Apply loads and displacements in steps, and at each step
             % recalculate the stiffness matrix to account for beam
             % reorientations
             this.intermediary_bc = this.BC / this.loading_steps;
             this.intermediary_F  = this.loads / this.loading_steps;
-
+            
             for j = 1 : this.loading_steps
 
                 % Assemble matrix - use sparse for efficiency
-                this.stiffness_matrix = sparse(this.assemble_matrix());
+                % this.stiffness_matrix = sparse(this.assemble_matrix());
+                this.stiffness_matrix = this.assemble_matrix();
 
                 % Loads must be recalculated at each step to account for
                 % changed orientation of the elements
@@ -249,9 +254,11 @@ classdef FEM_2D_Solver
                 % Solve
                 delta = this.stiffness_matrix \ F;
 
+
                 % Compute displacements
                 [node_disp , node_rot] = this.extract_nodal_displacements(delta);
-
+                
+                cumdisp = cumdisp + node_disp;
                 this.intermediary_solution = this.intermediary_solution + node_disp;
                 cumulative_rotations = cumulative_rotations + node_rot;
             end
@@ -272,33 +279,41 @@ classdef FEM_2D_Solver
                 % Two nodes
                 p1 = this.intermediary_solution(this.connectivity(k,1),:);
                 p2 = this.intermediary_solution(this.connectivity(k,2),:);
-                % Length
-                L = norm(p1 - p2);
 
                 % Constants
-                ka  = this.CSA  * this.E/L;
-                k12 = 12*this.E * this.I / L^3;
-                k6  = 6*this.E  * this.I / L^2;
-                k4  = 4*this.E  * this.I / L;
-                k2  = 2*this.E  * this.I / L;
+                L = norm(p1 - p2);
+                E = this.E;
+                Iy = this.Iy;
+                Iz = this.Iz;
+                A = this.CSA;
+                G = this.G;
+                J = this.J;
+                
 
                 % Matrix in local coordinates
-                kl = [ka  , 0    , 0   , -ka , 0    , 0;...
-                      0   , k12  , k6  , 0   , -k12 , k6;...
-                      0   , k6   , k4  , 0   , -k6  , k2;...
-                      -ka , 0    , 0   , ka  , 0    , 0;...
-                      0   , -k12 , -k6 , 0   , k12  , -k6;...
-                      0   , k6   , k2  , 0   , -k6  , k4];
+                kl= [(E*A)/L        0             0              0        0             0          (-E*A)/L            0                  0              0             0              0;... 
+                        0     (12*E*Iz)/L^3       0              0        0         (6*E*Iz)/L^2       0             (-12*E*Iz)/L^3       0              0             0         (6*E*Iz)/L^2;...
+                        0           0       (12*E*Iy)/L^3        0   (-6*E*Iy)/L^2       0             0                0           (-12*E*Iy)/L^3       0        (-6*E*Iy)/L^2       0;...
+                        0           0             0           (G*J)/L     0              0             0                0                 0           (-G*J)/L         0              0;...
+                        0           0        (-6*E*Iy)/L^2       0     (4*E*Iy)/L        0             0                0            (6*E*Iy)/L^2        0         (2*E*Iy)/L         0;...
+                        0      (6*E*Iz)/L^2       0              0        0         (4*E*Iz)/L         0           (-6*E*Iz)/L^2          0              0             0         (2*E*Iz)/L;...
+                    (-E*A)/L        0             0              0        0              0           (E*A)/L            0                 0              0             0              0;... 
+	                    0     (-12*E*Iz)/L^3      0              0        0        (-6*E*Iz)/L^2       0            (12*E*Iz)/L^3         0              0             0         (-6*E*Iz)/L^2;... 
+                        0           0       (-12*E*Iy)/L^3       0   (6*E*Iy)/L^2        0             0                0            (12*E*Iy)/L^3       0         (6*E*Iy)/L^2       0;... 
+                        0           0             0          (-G*J)/L     0              0             0                0                 0           (G*J)/L          0              0;... 
+                        0           0       (-6*E*Iy)/L^2        0     (2*E*Iy)/L        0             0                0             (6*E*Iy)/L^2       0         (4*E*Iy)/L         0;...
+                        0      (6*E*Iz)/L^2       0              0        0         (2*E*Iz)/L         0          (-6*E*Iz)/L^2            0             0             0         (4*E*Iz)/L;...
+                    ];
 
                 % Matrix in global coordinates
-                kg = this.local_to_global_stiffness(p1 , p2 , kl);      
+                kg = this.local_to_global_stiffness(p1 , p2 , kl);
+                
                 steering_vector = [this.dof(this.connectivity(k,1),:) , this.dof(this.connectivity(k,2),:)]';
 
                 % Add to global stiffness matrix
                 K = this.assemble_K(K, kg , steering_vector);
             end
             
-
         end
 
         
@@ -313,6 +328,9 @@ classdef FEM_2D_Solver
         end
         function this = set.BC(this, BC)
             % Stores values and checks for consistency
+            % Order of boundary condition is 
+            % [ux1; uy1; uz1; rotx1; roty1; rotz1; ux2; uy2; uz2; rotx2; roty2; rotz2;]
+
             this.BC  = BC;
             this.dof = this.count_DoF();   % Update Degrees of freedom
             if ~isempty(BC)
@@ -339,7 +357,7 @@ classdef FEM_2D_Solver
             loads = this.loads;
             % If no loads are assigned, assumed unloaded            
             if numel(loads) == 0
-                loads = zeros(this.n_nodes , 3); 
+                loads = zeros(this.n_nodes , 6); 
             end
             
 
@@ -352,11 +370,12 @@ classdef FEM_2D_Solver
             c = this.connectivity;
             
             h = zeros(size(c, 1) , 1);
-            for k = 1 : size(c, 1)
-                h(k) = plot([this.results.deformed(c(k,1) , 1) , this.results.deformed(c(k,2) , 1)] , ...
-                            [this.results.deformed(c(k,1) , 2) , this.results.deformed(c(k,2) , 2)] , 'r--');
-                hold on;            
-           end       
+            for k = 1 : size(c , 1)
+                h(k) = plot3([this.results.deformed(c(k,1),1) ; this.results.deformed(c(k,2),1)] , ...
+                             [this.results.deformed(c(k,1),2) ; this.results.deformed(c(k,2),2)] , ...
+                             [this.results.deformed(c(k,1),3) ; this.results.deformed(c(k,2),3)], 'r-*');
+                hold on;
+            end   
            axis equal;
          end
         
@@ -368,8 +387,9 @@ classdef FEM_2D_Solver
             
             h = zeros(size(c, 1) , 1);
             for k = 1 : size(c , 1)
-                h(k) = plot([this.coordinates(c(k,1),1) ; this.coordinates(c(k,2),1)] , ...
-                            [this.coordinates(c(k,1),2) ; this.coordinates(c(k,2),2)] , 'b-*');
+                h(k) = plot3([this.coordinates(c(k,1),1) ; this.coordinates(c(k,2),1)] , ...
+                             [this.coordinates(c(k,1),2) ; this.coordinates(c(k,2),2)] , ...
+                             [this.coordinates(c(k,1),3) ; this.coordinates(c(k,2),3)], 'b-*');
                 hold on;
             end
             axis equal;
@@ -380,12 +400,14 @@ classdef FEM_2D_Solver
     %% Private methods
     methods (Access = private)
         
-
         function checkConstants(this)
             
             constants = {'E', 'Young''s modulus';
-                         'I', 'Moment of intertia';
-                         'CSA', 'Cross-sectional area';};
+                         'Iy', 'Moment of intertia';
+                         'Iz', 'Moment of intertia';
+                         'CSA', 'Cross-sectional area';
+                         'G', 'Shear modulus';
+                          'J', 'Torsional constant';};
 
             for k = 1 : size(constants, 1)
                 if isempty(this.(constants{k,1})) || this.(constants{k,1}) < 0
@@ -398,29 +420,29 @@ classdef FEM_2D_Solver
             % Checks for data consistency and raises errors
             
             errors = cell(0);
-            if size(this.coordinates , 2) ~= 2
-                errors{end+1,1} = 'Coordinates should be an Nx2 matrix';
+            if size(this.coordinates , 2) ~= 3
+                errors{end+1,1} = 'Coordinates should be an Nx3 matrix';
                 this.coordinates = [];
             end
             
-            if ~isempty(this.BC) && size(this.BC , 2) ~= 3
-                errors{end+1,1} = 'BC should be an Nx3 matrix; number of columns is wrong';
+            if ~isempty(this.BC) && size(this.BC , 2) ~= 6
+                errors{end+1,1} = 'BC should be an Nx6 matrix; number of columns is wrong';
                 this.BC = [];
             end
             
             if ~isempty(this.n_nodes) && this.n_nodes ~= 0 && ...
                     ~isempty(this.BC) && size(this.BC,1) ~= this.n_nodes
-                errors{end+1,1} = 'BC should be an Nx3 matrix; number of rows is wrong';
+                errors{end+1,1} = 'BC should be an Nx6 matrix; number of rows is wrong';
                 this.BC = [];
             end
                 
-            if ~isempty(this.loads) && size(this.loads , 2) ~= 3
-                errors{end+1,1} = 'loads should be an Nx3 matrix; number of columns is wrong';
+            if ~isempty(this.loads) && size(this.loads , 2) ~= 6
+                errors{end+1,1} = 'loads should be an Nx6 matrix; number of columns is wrong';
                 this.loads = [];
             end
             if ~isempty(this.n_nodes) && this.n_nodes ~= 0 && ...
                     ~isempty(this.loads) && size(this.loads , 1) ~= this.n_nodes
-                errors{end+1,1} = 'loads should be an Nx3 matrix; number of rows is wrong';
+                errors{end+1,1} = 'loads should be an Nx6 matrix; number of rows is wrong';
                 this.loads = [];
             end
             
@@ -446,9 +468,10 @@ classdef FEM_2D_Solver
             N = numel(this.loads);
 
             F = zeros(N,1);
-            F(1:3:end) = this.intermediary_F(:,1);   % X forces
-            F(2:3:end) = this.intermediary_F(:,2);   % Y forces
-            F(3:3:end) = this.intermediary_F(:,3);   % Moments
+            for k = 1 : 6
+                F(k:6:end) = this.intermediary_F(:,k);
+            end
+
             
             % Remove forces corresponding to constraints
             ind = reshape(this.dof' , [] , 1);  % DOF in the same order as forces
@@ -504,7 +527,7 @@ classdef FEM_2D_Solver
             %   kg: local stiffess matrix in global coordinates
             %   g: steering vector (element numbers)
 
-            eldof = 2*3; % Number of degrees of freedom per element 	
+            eldof = 2*6; % Number of degrees of freedom per element 	
             for i=1:eldof
                if g(i) ~= 0
                   for j=1: eldof
@@ -523,22 +546,38 @@ classdef FEM_2D_Solver
             % Rotates the local stiffness matrix according to the
             % orientation of the beam in the global coordinate system
             
-            % Orientation of the beam
-            theta = atan2(p2(2) - p1(2) , p2(1) - p1(1)); 
-
-            % Rotation matrix
-            c = cos(theta);
-            s = sin(theta);
-            C = [c , -s , 0 , 0  , 0  , 0 ; ...
-                 s , c , 0  , 0  , 0  , 0 ; ...
-                 0 , 0 , 1  , 0  , 0  , 0 ; ...
-                 0 , 0 , 0  , c  , -s , 0 ;
-                 0 , 0 , 0  , s  , c  , 0 ;
-                 0 , 0 , 0  , 0  , 0  , 1];
             
-            % Rotate local stiffness matrix
-            kg = C * kl * C';
+            % Rotation matrix
+            n3 = (p2-p1)/norm((p2-p1));
+            n1 = [1 0 0];    % Orientation of the coordinate system
 
+            % n2(1) = n3(2)*n1(3)-n3(3)*n1(2);
+            % n2(2) =-n1(3)*n3(1)+n1(1)*n3(3);
+            % n2(3) = n3(1)*n1(2)-n1(1)*n3(2);
+            % 
+            % R=[n1; n2; n3];
+
+            C = cross(n1, n3) ; 
+            D = dot(n1, n3) ;
+            NP0 = norm(n1);
+
+            if all(C==0) % check for colinearity    
+
+                R = sign(D) * (norm(n3) / NP0) ; % orientation and scaling
+
+            else
+                Z = [0 -C(3) C(2); C(3) 0 -C(1); -C(2) C(1) 0] ; 
+                R = (eye(3) + Z + Z^2 * (1-D)/(norm(C)^2)) / NP0^2 ; % rotation matrix
+            
+                % Assemble in 12*12
+                R=[  R     zeros(3) zeros(3) zeros(3);
+                     zeros(3)   R     zeros(3) zeros(3);
+                     zeros(3) zeros(3)   R     zeros(3);
+                     zeros(3) zeros(3) zeros(3)   R    ];            
+            end
+
+            % Rotate local stiffness matris
+            kg = R * kl * R';
         end
 
    
@@ -551,7 +590,7 @@ classdef FEM_2D_Solver
                 return
             end
             
-            dof = ones(this.n_nodes, 3);  % Initialise the matrix nf to 1
+            dof = ones(this.n_nodes, 6);  % Initialise the matrix nf to 1
             dof(this.BC == 0) = 0;        % Prescribed nodal freedom
             
             cnt = sum(dof(:) == 1);   % Total number of degrees of freedom
@@ -570,24 +609,11 @@ classdef FEM_2D_Solver
             output = this.dof';             % Fixed DOF remain zero
             output(output ~=0) = delta;     % Replace other values
             output = output';
-            node_disp = [output(:,1) , output(:,2)];    % X and Z displacements
-            node_rot = output(:,3);                     % Rotations
+            node_disp = output(:,1:3);    % X, Y and Z displacements
+            node_rot  = output(:,4:6);                     % Rotations
 
         end        
         
-        function L = get_element_length(this)
-
-            % Calculates length of all elements
-            N = size(this.connectivity , 1);
-            L = zeros(N,1);
-            for k = 1 : N
-                % Two nodes
-                p1 = this.intermediary_solution(this.connectivity(k,1),:);
-                p2 = this.intermediary_solution(this.connectivity(k,2),:);
-                L(k) = norm(p2 - p1);
-            end
-
-        end
         
     end
  
