@@ -1,0 +1,49 @@
+finish
+/clear
+
+/prep7
+!List of Nodes
+*DO,idx,1,11
+    n,  idx,  50*idx-50, 0, 0       ! Create nodes
+*ENDDO
+
+
+!Material Properties and element type
+et, 1, beam188       ! Element type beam3
+mp, ex, 1, 1.e7      ! Elastic modulus
+
+
+! Cross section data
+SECTYPE,1,BEAM,CSOLID
+SECDATA,5.642    ! radius to get cross sectional area of 100
+
+
+!List of elements and nodes they connect
+!Create  elements in a for loop
+*DO,idx,1,10
+    e,  idx,  idx+1       ! Element Number 1 connects nodes 1 & 2 and direction node
+*ENDDO
+
+!Displacement Boundary Conditions
+d, 1, all, 0.0        ! Node 1 fixed
+
+
+!Applied Force
+f, 6, fy, 5e4       ! Force at node 11 in positive y-direction
+f, 11, my, 5e6       ! Moment at node 11
+
+/pnum, elem, 1       ! Plot element numbers
+eplot                ! Plot the elements
+!finish
+
+/solu                ! Select static load solution
+nlgeom, on			 ! Large displacements
+antype, static
+solve
+
+
+! Plot solution and show displacements
+/POST1  
+PLDISP,1
+PRNSOL,U,COMP  
+	

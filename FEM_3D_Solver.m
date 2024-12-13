@@ -56,25 +56,26 @@ classdef FEM_3D_Solver
             % Reset object to input data
             this = FEM_3D_Solver;
             
+            radius   = 5.642;     % Radius for a CSA of 100
             this.E   = 1e7;     % Young's modulus
-            this.CSA = 100;     % Cross-sectionala area
-            this.Iy  = 1;    % Moment of inertia
-            this.Iz  = 1;    % Moment of inertia
-            this.G   = 1;
-            this.J   = 1;
-            
+            this.CSA = pi*radius^2;     % Cross-sectionala area
+            this.Iy  = pi*radius^4/4;    % Moment of inertia
+            this.Iz  = pi*radius^4/4;    % Moment of inertia
+            this.G   = this.E / (2*(1+0.3));  % Shear modulus assuming Poisson ratio of 0.3
+            this.J   = pi*radius^4/2;
+
             % Geometry of horizontal beam
-            this.coordinates  = [linspace(0,10,11) ; zeros(1,11); zeros(1,11)]';
+            this.coordinates  = [linspace(0,500,11) ; zeros(1,11); zeros(1,11)]';
             this.connectivity = [1:this.n_nodes-1; 2:this.n_nodes]'; % Each element connected to the next
             
             % Boundary conditions
             this.BC = [0 0 0 0 0 0 ; NaN(this.n_nodes-1 , 6)];    % Base constrained in displacements and rotation    
-            this.BC(end,:) = [NaN, 1, NaN, NaN, NaN, NaN];        % Imposed displacement at the top
             
             % Loads
             this.loading_steps = 20;                      % Apply BC and loads in 10 steps
-            this.loads = zeros(this.n_nodes , 6);          % Empty load matrix
-            this.loads(round(this.n_nodes/2) , :) = [0, 0, 1e2, 0, 0 0];  % Add load mid-shaft
+            this.loads = zeros(this.n_nodes , 6);         % Empty load matrix
+            this.loads(ceil(this.n_nodes/2) , :) = [0, 5e4, 0, 0, 0, 0];  % Add load mid-shaft
+            this.loads(end , :) = [0, 0, 0, 0, 5e6, 0];   % Add moment at beam end
             
             
             this = this.solveFEM();
@@ -90,7 +91,8 @@ classdef FEM_3D_Solver
             % Plot border conditions
             BC_ = this.BC;
             BC_(isnan(BC_)) = 0;
-            h(3) = quiver(this.coordinates(end,1) , this.coordinates(end,2) , BC_(end,1) , BC_(end,2),...
+            h(3) = quiver3(this.coordinates(end,1) , this.coordinates(end,2), this.coordinates(end,3) ,...
+                           BC_(end,1) , BC_(end,2), BC_(end,3),...
                 'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1);
             
             
@@ -98,25 +100,43 @@ classdef FEM_3D_Solver
             pos = find(this.loads ~= 0);
             for j = 1 : length(pos)
                 [row , ~]= ind2sub(size(this.loads) , pos(j));
-                force_direction = [sign(this.loads(row , 1)) , sign(this.loads(row , 2))];
+                force_direction = [sign(this.loads(row , 1)) , sign(this.loads(row , 2)), sign(this.loads(row , 3))];
                 
-                h(3+j) = quiver(this.coordinates(row,1) , this.coordinates(row,2) , ...
-                                0.3*force_direction(1), ...
-                                0.3*force_direction(2),... 
+                h(3+j) = quiver3(this.coordinates(row,1) , this.coordinates(row,2) , this.coordinates(row,3) , ...
+                                100*force_direction(1), ...
+                                100*force_direction(2),... 
+                                100*force_direction(3),... 
                                 'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1);
+
+                % Moment
+                moment_direction = [sign(this.loads(row , 4)) , sign(this.loads(row , 5)), sign(this.loads(row , 6))];
+                h(3+j) = quiver3(this.coordinates(row,1) , this.coordinates(row,2) , this.coordinates(row,3) , ...
+                                100*moment_direction(1), ...
+                                100*moment_direction(2),... 
+                                100*moment_direction(3),... 
+                                'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1);                
+                quiver3(this.coordinates(row,1) , this.coordinates(row,2) , this.coordinates(row,3) , ...
+                        80*moment_direction(1), ...
+                        80*moment_direction(2),... 
+                        80*moment_direction(3),... 
+                        'linewidth',1,'AutoScale','on', 'AutoScaleFactor', 1,...
+                        'Color', get(h(3+j), 'Color'));                   
             end    
             
             % Displacements obtained from ansys simulation
-            ansys_displacements = [[0;0.0019;-0.00995;-0.0367;-0.0640;-0.0771;-0.0882;-0.0888;-0.0893;-0.0935;-0.1007] ,...
-                                   [0;0.095;0.33;0.64;0.96;1.20;1.33;1.34;1.27;1.15;1], zeros(11,1)];
-            
+            ansys_displacements = [[0, -0.037232	-0.32859	-0.99579	-2.0523	-3.4412	-5.1045	-7.0568	-9.3458	-12.019	-15.122]' ,...
+                                   [0, 1.7645	6.6248	13.793	22.489	31.947	41.576	51.205	60.834	70.465	80.096]', ...
+                                   [0, -0.78501	-3.1199	-6.9836	-12.364	-19.26	-27.678	-37.613	-49.055	-61.993	-76.414]'];
+
             ansys_solution = ansys_displacements + this.coordinates;
             
-            h(end+1) = plot(ansys_solution(:,1) , ansys_solution(:,2) , 'g--');
+            h(end+1) = plot3(ansys_solution(:,1) , ansys_solution(:,2),  ansys_solution(:,3),  'g--');
             
-            legend(h , {'Original structure' , 'Deformed structure' , 'Displacement' , 'Forces' , 'Ansys solution'} , 'Location' , 'NorthWest');
-            
-            axis([-0.1 , max(this.coordinates(:,1)) + 1 , -1 , 4.5])
+            legend(h , {'Original structure' , 'Deformed structure' , 'Displacement' , 'Force', 'Moment' , 'Ansys solution'} , 'Location' , 'NorthWest');
+            xlabel('x');  ylabel('y');  zlabel('z');
+            axis([0 , max(this.coordinates(:,1)) + 20 , -50 , 100, -100, 20])
+            grid on;  view([-39, 7]);
+
         end
         
         
