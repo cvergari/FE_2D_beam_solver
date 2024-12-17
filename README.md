@@ -1,6 +1,6 @@
-# FE 2D beam solver
+# FE beam solver
 
-A simple finite element solver in Matlab for beam problems in 2D AND 3D. It allows for boundary conditions as forces but also imposed displacements and rotations.
+A simple finite element solver in Matlab for beam problems in 2D AND 3D. It allows for forces as boundary conditions, but also imposed displacements and rotations.
 
 
 ### Getting started
@@ -30,8 +30,8 @@ The output of reaction forces is not implemented yet, just because I have not ne
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
 
 ## Version
-Version 0.2
+Version 0.3
 
 
 ## Matlab
-[![View FE_2D_beam_solver on File Exchange](https://www.mathworks.com/matlabcentral/images/matlab-file-exchange.svg)](https://fr.mathworks.com/matlabcentral/fileexchange/74764-fe_2d_beam_solver)
+[![View FE_beam_solver on File Exchange](https://www.mathworks.com/matlabcentral/images/matlab-file-exchange.svg)](https://fr.mathworks.com/matlabcentral/fileexchange/74764-fe_2d_beam_solver)
